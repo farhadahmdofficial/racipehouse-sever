@@ -53,6 +53,7 @@ async function run() {
     const db = client.db("recipehouse");
     const subscriptionCollection = db.collection("subscriptions");
     const userCollection = db.collection("user");
+    const recipeCollection = db.collection("recipes");
 
     console.log("✅ MongoDB Connected Successfully!");
 
@@ -127,7 +128,100 @@ async function run() {
     // Better Auth Handler
     app.all("/api/auth/*splat", toNodeHandler(auth));
 
+
+
+
+
     // 🎯 Subscription & Plan Update Route
+
+//     app.post("/subscription", async (req, res) => {
+//   try {
+//     const { user, session_id } = req.body;
+
+//     // ১. প্রয়োজনীয় ডাটা আছে কিনা চেক
+//     if (!user?.id || !session_id) {
+//       return res.status(400).json({ 
+//         success: false, 
+//         message: "User ID and session_id are required!" 
+//       });
+//     }
+
+//     // 🎯 ২. ডুপ্লিকেট চেক: এই session_id কি আগেই প্রসেস করা হয়েছে?
+//     const existingSub = await subscriptionCollection.findOne({ session_id });
+
+//     if (existingSub) {
+//       // ডাটা আগেই যুক্ত হয়ে গেছে, তাই নতুন করে ইনসার্ট না করে সফল মেসেজ ফেরত দিন
+//       return res.status(200).json({
+//         success: true,
+//         message: "Subscription already processed!",
+//         alreadyProcessed: true,
+//       });
+//     }
+
+//     // ৩. Stripe থেকে পেমেন্ট স্ট্যাটাস ভেরিফাই করা
+//     const session = await stripe.checkout.sessions.retrieve(session_id);
+
+//     if (session.payment_status !== "paid") {
+//       return res.status(400).json({ 
+//         success: false, 
+//         message: "Payment has not been completed." 
+//       });
+//     }
+
+//     // ৪. ObjectId সেফ কাস্টিং
+//     let userObjectId;
+//     try {
+//       userObjectId = new ObjectId(user.id);
+//     } catch (err) {
+//       return res.status(400).json({ 
+//         success: false, 
+//         message: "Invalid User ID format." 
+//       });
+//     }
+
+//     // ৫. Subscriptions কালেকশনে এন্ট্রি তৈরি (প্রথমবার হলে)
+//     const sub_result = await subscriptionCollection.insertOne({
+//       userId: userObjectId,
+//       session_id,
+//       amount: session.amount_total / 100,
+//       currency: session.currency,
+//       createdAt: new Date(),
+//     });
+
+//     // ৬. User কালেকশনে প্রিমিয়াম স্ট্যাটাস আপডেট
+//     const user_result = await userCollection.updateOne(
+//       { _id: userObjectId },
+//       { 
+//         $set: { 
+//           plan: "pro",
+//           isPremium: true,
+//           updatedAt: new Date()
+//         } 
+//       }
+//     );
+
+//     // ৭. সফল রেসপন্স
+//     return res.status(200).json({
+//       success: true,
+//       message: "Subscription verified and plan upgraded successfully!",
+//       sub_result,
+//       user_result,
+//     });
+
+//   } catch (error) {
+//     console.error("❌ Error in /subscription route:", error);
+//     return res.status(500).json({ 
+//       success: false, 
+//       message: "Internal Server Error", 
+//       error: error.message 
+//     });
+//   }
+// });
+
+
+
+
+
     app.post("/subscription", async (req, res) => {
   try {
     const { user, session_id } = req.body;
@@ -220,6 +314,52 @@ async function run() {
     //   res.send({ sub_result, user_result });
 
     // });
+
+
+
+
+
+    // recipe post api 
+
+
+    // Express.js Route for Creating a New Recipe
+app.post("/recipes", async (req, res) => {
+  try {
+    const recipeData = req.body;
+
+    // ১. প্রয়োজনীয় ফিল্ডগুলো চেক করা (Basic Validation)
+    if (!recipeData.name || !recipeData.ingredients) {
+      return res.status(400).json({ 
+        success: false, 
+        message: "Recipe name and ingredients are required!" 
+      });
+    }
+
+    // ২. নতুন ফিল্ড ও টাইমস্ট্যাম্প যোগ করা
+    const newRecipe = {
+      ...recipeData,
+      createdAt: new Date(),
+      status: "approved" // বা "pending" যদি অ্যাডমিন এপ্রুভাল লাগে
+    };
+
+    // ৩. MongoDB-তে সেভ করা
+    const result = await recipeCollection.insertOne(newRecipe);
+
+    res.status(201).json({
+      success: true,
+      message: "Recipe created successfully!",
+      insertedId: result.insertedId
+    });
+
+  } catch (error) {
+    console.error("Error creating recipe:", error);
+    res.status(500).json({ 
+      success: false, 
+      message: "Failed to create recipe", 
+      error: error.message 
+    });
+  }
+});
 
 
 
