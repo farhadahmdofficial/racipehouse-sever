@@ -321,13 +321,11 @@ async function run() {
 
     // recipe post api 
 
-
-    // Express.js Route for Creating a New Recipe
-app.post("/recipes", async (req, res) => {
+    app.post("/recipes", async (req, res) => {
   try {
     const recipeData = req.body;
 
-    // ১. প্রয়োজনীয় ফিল্ডগুলো চেক করা (Basic Validation)
+    // ১. প্রয়োজনীয় ফিল্ডগুলো চেক করা (Basic Validation)
     if (!recipeData.name || !recipeData.ingredients) {
       return res.status(400).json({ 
         success: false, 
@@ -338,6 +336,7 @@ app.post("/recipes", async (req, res) => {
     // ২. নতুন ফিল্ড ও টাইমস্ট্যাম্প যোগ করা
     const newRecipe = {
       ...recipeData,
+      price: Number(recipeData.price) || 0, // 👈 'price' নাম্বারে কনভার্ট হবে
       createdAt: new Date(),
       status: "approved" // বা "pending" যদি অ্যাডমিন এপ্রুভাল লাগে
     };
@@ -362,6 +361,48 @@ app.post("/recipes", async (req, res) => {
 });
 
 
+    
+// app.post("/recipes", async (req, res) => {
+//   try {
+//     const recipeData = req.body;
+
+//     // ১. প্রয়োজনীয় ফিল্ডগুলো চেক করা (Basic Validation)
+//     if (!recipeData.name || !recipeData.ingredients) {
+//       return res.status(400).json({ 
+//         success: false, 
+//         message: "Recipe name and ingredients are required!" 
+//       });
+//     }
+
+//     // ২. নতুন ফিল্ড ও টাইমস্ট্যাম্প যোগ করা
+//     const newRecipe = {
+//       ...recipeData,
+//       createdAt: new Date(),
+//       status: "approved" // বা "pending" যদি অ্যাডমিন এপ্রুভাল লাগে
+//     };
+
+//     // ৩. MongoDB-তে সেভ করা
+//     // const result = await recipeCollection.insertOne({ ...newRecipe, Price: Number(recipeData?.Price) });
+
+//     const result = await recipeCollection.insertOne(newRecipe);
+
+//     res.status(201).json({
+//       success: true,
+//       message: "Recipe created successfully!",
+//       insertedId: result.insertedId
+//     });
+
+//   } catch (error) {
+//     console.error("Error creating recipe:", error);
+//     res.status(500).json({ 
+//       success: false, 
+//       message: "Failed to create recipe", 
+//       error: error.message 
+//     });
+//   }
+// });
+
+
 
 
 
@@ -370,6 +411,20 @@ app.post("/recipes", async (req, res) => {
     
 
     // Root Endpoint
+   
+  //  get aip
+
+
+  app.get('/recipes', async (req, res) => {
+
+    const result = await recipeCollection.find().toArray();
+    res.send(result);
+    
+
+
+  })
+   
+   
     app.get('/', (req, res) => {
       res.send('RecipeHouse Server is Running!');
     });
