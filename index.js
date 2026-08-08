@@ -423,6 +423,14 @@ async function run() {
 
 
   })
+
+
+  app.get("/recipes/:id", async (req, res) => {
+    const {id} = req.params
+    const result = await recipeCollection.findOne({ _id: new ObjectId(id) });
+    
+    res.send(result);
+  });
    
    
     app.get('/', (req, res) => {
