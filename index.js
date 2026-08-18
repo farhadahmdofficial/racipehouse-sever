@@ -535,33 +535,66 @@ app.post("/payment", async (req, res) => {
 
 
 
-const JWKS = createRemoteJWKSet(new url(`${process.env.CLIENT_URL}/api/auth/jwks`))
 
-// verify tonke 
 
-const verifyToken= async(req,res,next)=>{
-  const authheader= req.headers.authorization
 
-  if(!authheader || !authheader.startWith("Bearer")){
-    res.status(401).send({msg:"Unauthrized"})
+const JWKS = createRemoteJWKSet(new URL(`${process.env.CLIENT_URL}/api/auth/jwks`));
+
+// Verify Token Middleware
+// index.js এর উপরের দিকে (আলাদা করে export করার দরকার নেই)
+const verifyToken = async (req, res, next) => {
+  const authheader = req.headers.authorization;
+
+  if (!authheader || !authheader.startsWith("Bearer ")) {
+    return res.status(401).send({ msg: "Unauthorized" });
   }
-  const token =authheader.split(" ")[1]
-  if(!token){res.status(401).send({msg:"Unauthrized"})}
-  try{
-    const {payload}=await jwtVerify(token,JWKS)
-    console.log(payload);
-      next()
 
-  }catch(error)
-  {
-    console.log(error);
-    res.status(401).send({msg:"Unauthrized"})
+  const token = authheader.split(" ")[1];
 
+  if (!token) {
+    return res.status(401).send({ msg: "Unauthorized" });
   }
+
+  try {
+    const { payload } = await jwtVerify(token, JWKS);
+    console.log(payload,"thsi payload");
+    req.user = payload;
+    next();
+  } catch (error) {
+    console.error("JWT Error:", error.message);
+    return res.status(401).send({ msg: "Unauthorized" });
+  }
+};
+
+// ok code 
+
+// const JWKS = createRemoteJWKSet(new url(`${process.env.CLIENT_URL}/api/auth/jwks`))
+
+// // verify tonke 
+
+// const verifyToken= async(req,res,next)=>{
+//   const authheader= req.headers.authorization
+
+//   if(!authheader || !authheader.startWith("Bearer")){
+//     res.status(401).send({msg:"Unauthrized"})
+//   }
+//   const token =authheader.split(" ")[1]
+//   if(!token){res.status(401).send({msg:"Unauthrized"})}
+//   try{
+//     const {payload}=await jwtVerify(token,JWKS)
+//     console.log(payload);
+//       next()
+
+//   }catch(error)
+//   {
+//     console.log(error);
+//     res.status(401).send({msg:"Unauthrized"})
+
+//   }
 
  
 
-}
+// }
 
 
 
@@ -620,45 +653,7 @@ const verifyToken= async(req,res,next)=>{
 
 
     
-// app.post("/recipes", async (req, res) => {
-//   try {
-//     const recipeData = req.body;
 
-//     // ১. প্রয়োজনীয় ফিল্ডগুলো চেক করা (Basic Validation)
-//     if (!recipeData.name || !recipeData.ingredients) {
-//       return res.status(400).json({ 
-//         success: false, 
-//         message: "Recipe name and ingredients are required!" 
-//       });
-//     }
-
-//     // ২. নতুন ফিল্ড ও টাইমস্ট্যাম্প যোগ করা
-//     const newRecipe = {
-//       ...recipeData,
-//       createdAt: new Date(),
-//       status: "approved" // বা "pending" যদি অ্যাডমিন এপ্রুভাল লাগে
-//     };
-
-//     // ৩. MongoDB-তে সেভ করা
-//     // const result = await recipeCollection.insertOne({ ...newRecipe, Price: Number(recipeData?.Price) });
-
-//     const result = await recipeCollection.insertOne(newRecipe);
-
-//     res.status(201).json({
-//       success: true,
-//       message: "Recipe created successfully!",
-//       insertedId: result.insertedId
-//     });
-
-//   } catch (error) {
-//     console.error("Error creating recipe:", error);
-//     res.status(500).json({ 
-//       success: false, 
-//       message: "Failed to create recipe", 
-//       error: error.message 
-//     });
-//   }
-// });
 
 
 
