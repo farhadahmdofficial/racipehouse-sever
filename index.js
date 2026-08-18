@@ -888,18 +888,18 @@ app.get('/recipes', async (req, res) => {
 
 
   // my recipe
-  app.get('/myrecipes', async (req, res) => {
+  // app.get('/myrecipes', async (req, res) => {
 
 
    
 
-    const result = await recipeCollection.find().toArray();
+  //   const result = await recipeCollection.find().toArray();
 
-    res.send(result);
+  //   res.send(result);
     
 
 
-  })
+  // })
   // app.get('/myrecipes', async (req, res) => {
 
 
