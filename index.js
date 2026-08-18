@@ -922,32 +922,32 @@ app.get('/recipes', async (req, res) => {
 
 
 // ১. রিপোর্ট জমা নেওয়ার API (POST /api/reports)
-app.post('/api/reports', async (req, res) => {
-  try {
-    const { recipeId, recipeTitle, reportedByEmail, userId, reason } = req.body;
+// app.post('/api/reports', async (req, res) => {
+//   try {
+//     const { recipeId, recipeTitle, reportedByEmail, userId, reason } = req.body;
 
-    if (!recipeId || !reason) {
-      return res.status(400).json({ success: false, message: 'Missing required fields' });
-    }
+//     if (!recipeId || !reason) {
+//       return res.status(400).json({ success: false, message: 'Missing required fields' });
+//     }
 
-    const db = client.db('recipehouse');
+//     const db = client.db('recipehouse');
     
-    const newReport = {
-      recipeId: String(recipeId), // Safe string conversion
-      recipeTitle: recipeTitle || 'Untitled Recipe',
-      reportedByEmail: reportedByEmail || 'Anonymous',
-      userId: userId || null,
-      reason,
-      createdAt: new Date(),
-    };
+//     const newReport = {
+//       recipeId: String(recipeId), // Safe string conversion
+//       recipeTitle: recipeTitle || 'Untitled Recipe',
+//       reportedByEmail: reportedByEmail || 'Anonymous',
+//       userId: userId || null,
+//       reason,
+//       createdAt: new Date(),
+//     };
 
-    const result = await db.collection('reports').insertOne(newReport);
-    res.status(201).json({ success: true, message: 'Report submitted successfully', insertedId: result.insertedId });
-  } catch (error) {
-    console.error('Report submission error:', error);
-    res.status(500).json({ success: false, message: 'Internal server error' });
-  }
-});
+//     const result = await db.collection('reports').insertOne(newReport);
+//     res.status(201).json({ success: true, message: 'Report submitted successfully', insertedId: result.insertedId });
+//   } catch (error) {
+//     console.error('Report submission error:', error);
+//     res.status(500).json({ success: false, message: 'Internal server error' });
+//   }
+// });
 
 // ২. এডমিন প্যানেলের জন্য সব রিপোর্ট পাওয়ার API (GET /api/admin/reports)
 app.get('/api/admin/reports', async (req, res) => {
