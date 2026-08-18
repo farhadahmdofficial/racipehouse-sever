@@ -15,6 +15,7 @@ const { mongodbAdapter } = require('better-auth/adapters/mongodb');
 const { toNodeHandler } = require('better-auth/node');
 const { jwt } = require('better-auth/plugins');
 const Stripe = require('stripe');
+const { createRemoteJWKSet, jwtVerify } = require('jose-cjs');
 
 // const { MongoClient, ObjectId } = require('mongodb');
 // const { MongoClient, ServerApiVersion, ObjectId } = require('mongodb'); 
@@ -534,22 +535,36 @@ app.post("/payment", async (req, res) => {
 
 
 
+const JWKS = createRemoteJWKSet(new url(`${process.env.CLIENT_URL}/api/auth/jwks`))
+
+// verify tonke 
+
+const verifyToken= async(req,res,next)=>{
+  const authheader= req.headers.authorization
+
+  if(!authheader || !authheader.startWith("Bearer")){
+    res.status(401).send({msg:"Unauthrized"})
+  }
+  const token =authheader.split(" ")[1]
+  if(!token){res.status(401).send({msg:"Unauthrized"})}
+  try{
+    const {payload}=await jwtVerify(token,JWKS)
+    console.log(payload);
+      next()
+
+  }catch(error)
+  {
+    console.log(error);
+    res.status(401).send({msg:"Unauthrized"})
+
+  }
+
+ 
+
+}
 
 
 
-
-
-
-
-    // app.post("/subscription", async (req, res) => {
-    //   const { user,session_id} = req.body;
-    //   const sub_result = await subscriptionCollection.insertOne({ userId: new ObjectId(user.id), session_id });
-    //   const user_result = await userCollection.updateOne({ _id: new ObjectId(user.id) }, { $set: { plan: "pro" } });
-
-
-    //   res.send({ sub_result, user_result });
-
-    // });
 
 
 
@@ -563,7 +578,7 @@ app.post("/payment", async (req, res) => {
 
 
   // ok code 
-    app.post("/recipes", async (req, res) => {
+    app.post("/recipes",verifyToken, async (req, res) => {
   try {
     const recipeData = req.body;
 
