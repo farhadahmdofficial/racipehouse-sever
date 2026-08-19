@@ -300,6 +300,31 @@ async function run() {
   }
 });
 
+// new pro and free buge 
+// app.get("/check-subscription/:userId", async (req, res) => {
+//   try {
+//     const { userId } = req.params;
+
+//     // String এবং ObjectId উভয় ফরম্যাট দিয়ে সার্চ
+//     const query = {
+//       $or: [
+//         { userId: userId },
+//         ...(ObjectId.isValid(userId) ? [{ userId: new ObjectId(userId) }] : [])
+//       ]
+//     };
+
+//     const sub = await subscriptionCollection.findOne(query);
+
+//     if (sub) {
+//       return res.status(200).json({ isPro: true });
+//     }
+
+//     return res.status(200).json({ isPro: false });
+//   } catch (error) {
+//     return res.status(500).json({ isPro: false, error: error.message });
+//   }
+// });
+
 
 // payment 
 app.post("/payment", async (req, res) => {
@@ -822,6 +847,53 @@ app.get('/api/popular-recipes', async (req, res) => {
 
 
 
+
+
+
+
+//   app.get('/recipes', async (req, res) => {
+//   try {
+//     // Query Parameter থেকে page, limit এবং search এর মান নেওয়া
+//     const page = parseInt(req.query.page) || 1;
+//     const limit = parseInt(req.query.limit) || 10;
+//     const search = req.query.search || '';
+//     const skip = (page - 1) * limit;
+
+//     // Search Query Filter তৈরি
+//     let query = {};
+//     if (search.trim() !== '') {
+//       // name ফিল্ডের ওপর কেস-ইনসেনসিটিভ সার্চ করা হবে (নামে মিল পেলেই ডাটা রিটার্ন করবে)
+//       query.name = { $regex: search.trim(), $options: 'i' };
+//     }
+
+//     // ১. ফিল্টার ও পেজিনেশন অনুযায়ী ডাটা আনা
+//     const recipes = await recipeCollection
+//       .find(query)
+//       .skip(skip)
+//       .limit(limit)
+//       .toArray();
+
+//     // ২. ফিল্টার করা কুয়েরির ওপর ভিত্তি করে মোট ডাটার সংখ্যা বের করা
+//     const totalCount = await recipeCollection.countDocuments(query);
+
+//     // ৩. মোট কতটি পেজ হবে তা হিসেব করা
+//     const totalPages = Math.ceil(totalCount / limit);
+
+//     // ফ্রন্টএন্ডে অবজেক্ট আকারে রেসপন্স পাঠানো
+//     res.status(200).json({
+//       success: true,
+//       recipes,
+//       totalPages,
+//       totalCount,
+//       currentPage: page,
+//     });
+//   } catch (error) {
+//     console.error('Error fetching recipes:', error);
+//     res.status(500).json({ success: false, message: 'Server error' });
+//   }
+// });
+
+// ok code 
 app.get('/recipes', async (req, res) => {
   try {
     // Query Parameter থেকে page এবং limit এর মান নেওয়া (Default: Page 1, Limit 10)
