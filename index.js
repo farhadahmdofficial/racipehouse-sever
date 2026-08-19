@@ -1,20 +1,33 @@
 
 
+import dotenv from 'dotenv';
+dotenv.config();
+
+import express from 'express';
+import cors from 'cors';
+import { MongoClient, ServerApiVersion, ObjectId } from 'mongodb';
+import { betterAuth } from 'better-auth';
+import { mongodbAdapter } from 'better-auth/adapters/mongodb';
+import { toNodeHandler } from 'better-auth/node';
+import { jwt } from 'better-auth/plugins';
+import Stripe from 'stripe';
+import { createRemoteJWKSet, jwtVerify } from 'jose'; // নেটিভ jose ব্যবহার করা হয়েছে
 
 
 
 
-require('dotenv').config();
-const express = require('express');
-const cors = require('cors');
-// const { ObjectId } = require('mongodb');
-const { MongoClient, ServerApiVersion, ObjectId } = require('mongodb');
-const { betterAuth } = require('better-auth');
-const { mongodbAdapter } = require('better-auth/adapters/mongodb');
-const { toNodeHandler } = require('better-auth/node');
-const { jwt } = require('better-auth/plugins');
-const Stripe = require('stripe');
-const { createRemoteJWKSet, jwtVerify } = require('jose-cjs');
+
+// require('dotenv').config();
+// const express = require('express');
+// const cors = require('cors');
+// // const { ObjectId } = require('mongodb');
+// const { MongoClient, ServerApiVersion, ObjectId } = require('mongodb');
+// const { betterAuth } = require('better-auth');
+// const { mongodbAdapter } = require('better-auth/adapters/mongodb');
+// const { toNodeHandler } = require('better-auth/node');
+// const { jwt } = require('better-auth/plugins');
+// const Stripe = require('stripe');
+// const { createRemoteJWKSet, jwtVerify } = require('jose-cjs');
 
 
 
@@ -1104,6 +1117,21 @@ run().catch(console.dir);
 app.listen(port, () => {
   console.log(`🚀 Server listening on port ${port}`);
 });
+
+
+
+
+
+
+
+// new addd 
+export default app;
+
+if (process.env.NODE_ENV !== "production") {
+  app.listen(port, () => {
+    console.log(`🚀 Server running on port ${port}`);
+  });
+}
 
 
 
