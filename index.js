@@ -330,12 +330,61 @@ app.get('/recipes', async (req, res) => {
     res.status(500).json({ success: false, message: 'Server error' });
   }
 });
-app.get("/recipes/:id", async (req, res) => {
-    const {id} = req.params
-    const result = await recipeCollection.findOne({ _id: new ObjectId(id) });
-    
+
+// app.get("/recipes/:id", async (req, res) => {
+//   try {
+//     const { id } = req.params;
+
+//     // ১. চেক করুন ID টি Valid MongoDB ObjectId কিনা
+//     if (!ObjectId.isValid(id)) {
+//       return res.status(400).send({ message: "Invalid Recipe ID Format" });
+//     }
+
+//     // ২. ডাটাবেসে কুয়েরি করুন
+//     const result = await recipeCollection.findOne({ _id: new ObjectId(id) });
+
+//     // ৩. যদি ডাটাবেসে ঐ ID দিয়ে কোনো রেসিপি না পাওয়া যায়
+//     if (!result) {
+//       return res.status(404).send({ message: "Recipe Not Found" });
+//     }
+
+//     // ৪. রেসিপি পাওয়া গেলে তা রেসপন্স হিসেবে পাঠাল
+//     res.send(result);
+//   } catch (error) {
+//     console.error("Error fetching recipe by ID:", error);
+//     res.status(500).send({ message: "Internal Server Error", error: error.message });
+//   }
+// });
+
+
+
+
+
+
+
+// Express Route Target:
+
+
+
+app.get('/recipes/:id', async (req, res) => {
+  try {
+    const id = req.params.id;
+    const query = { _id: new ObjectId(id) };
+    const result = await recipeCollection.findOne(query);
     res.send(result);
-  });
+  } catch (error) {
+    res.status(500).send({ message: "Error fetching recipe", error });
+  }
+});
+
+
+
+// app.get("/recipes/:id", async (req, res) => {
+//     const {id} = req.params
+//     const result = await recipeCollection.findOne({ _id: new ObjectId(id) });
+    
+//     res.send(result);
+//   });
 
 
 
