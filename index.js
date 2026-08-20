@@ -14,7 +14,7 @@ import { toNodeHandler } from 'better-auth/node';
 import { jwt } from 'better-auth/plugins';
 import Stripe from 'stripe';
 // import { createRemoteJWKSet, jwtVerify } from 'jose';
-const { createRemoteJWKSet, jwtVerify } = require('jose-cjs');
+import { createRemoteJWKSet, jwtVerify } from 'jose-cjs';
 
 
 // Stripe Initialize
