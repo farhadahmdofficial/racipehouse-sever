@@ -1,7 +1,4 @@
 
-
-
-
 import dotenv from 'dotenv';
 dotenv.config();
 
@@ -13,28 +10,27 @@ import { mongodbAdapter } from 'better-auth/adapters/mongodb';
 import { toNodeHandler } from 'better-auth/node';
 import { jwt } from 'better-auth/plugins';
 import Stripe from 'stripe';
-// import { createRemoteJWKSet, jwtVerify } from 'jose';
 import { createRemoteJWKSet, jwtVerify } from 'jose-cjs';
 
-
-// Stripe Initialize
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
-
 const app = express();
 const port = process.env.PORT || 5000;
 
-// 1. CORS Middleware
+// 1. CORS Middleware (Added Live Vercel Client URL)
 app.use(
   cors({
-    origin: [process.env.CLIENT_URL, "http://localhost:3000"],
+    origin: [
+      process.env.CLIENT_URL,
+      "http://localhost:3000",
+      "https://racipehouse-client-theta.vercel.app" // 👈 আপনার লাইভ ফ্রন্টএন্ড URL
+    ],
     credentials: true,
   })
 );
 
-// 2. Body Parser Middleware
 app.use(express.json());
 
-// 🎯 Root Route (Global Scope-এ রাখা হয়েছে যাতে Vercel সহজে খুঁজে পায়)
+// 🎯 Root Route
 app.get('/', (req, res) => {
   res.status(200).send('RecipeHouse Server is Running Successfully!');
 });
@@ -53,8 +49,35 @@ const client = new MongoClient(uri, {
   }
 });
 
+// Cache DB connection for Serverless Architecture
+let db, subscriptionCollection, userCollection, recipeCollection, paymentCollection, favoritesCollection, reportsCollection;
+
+async function connectDB(req, res, next) {
+  try {
+    if (!db) {
+      await client.connect();
+      db = client.db("recipehouse");
+      subscriptionCollection = db.collection("subscriptions");
+      userCollection = db.collection("user");
+      recipeCollection = db.collection("recipes");
+      paymentCollection = db.collection("payment");
+      favoritesCollection = db.collection("favorites");
+      reportsCollection = db.collection("reports");
+      console.log("✅ MongoDB Connected Successfully!");
+    }
+    req.db = db;
+    next();
+  } catch (error) {
+    console.error("MongoDB Connection Error:", error);
+    res.status(500).json({ success: false, message: "Database Connection Failed" });
+  }
+}
+
+// Global DB Middleware
+app.use(connectDB);
+
 // JWKS Cache setup
-const JWKS = createRemoteJWKSet(new URL(`${process.env.CLIENT_URL || 'http://localhost:3000'}/api/auth/jwks`));
+const JWKS = createRemoteJWKSet(new URL(`${process.env.CLIENT_URL || 'https://racipehouse-client-theta.vercel.app'}/api/auth/jwks`));
 
 // Verify Token Middleware
 const verifyToken = async (req, res, next) => {
@@ -80,454 +103,942 @@ const verifyToken = async (req, res, next) => {
   }
 };
 
-async function run() {
+// ---------------- API ROUTES ----------------
+
+// Subscription Route
+app.post("/subscription", async (req, res) => {
   try {
-    await client.connect();
-    const db = client.db("recipehouse");
-    const subscriptionCollection = db.collection("subscriptions");
-    const userCollection = db.collection("user");
-    const recipeCollection = db.collection("recipes");
-    const paymentCollection = db.collection("payment");
+    const { user, session_id } = req.body;
 
-    console.log("✅ MongoDB Connected Successfully!");
+    if (!user?.id || !session_id) {
+      return res.status(400).json({ success: false, message: "User ID and session_id are required!" });
+    }
 
-    // Better Auth Setup
-    const auth = betterAuth({
-      database: mongodbAdapter(db, { client: client }),
-      emailAndPassword: { enabled: true },
-      socialProviders: {
-        google: { 
-          clientId: process.env.GOOGLE_CLIENT_ID,
-          clientSecret: process.env.GOOGLE_CLIENT_SECRET,
-        },
-      },
-      user: {
-        additionalFields: {
-          role: { type: "string", required: false, defaultValue: "user", input: true },
-          plan: { type: "string", required: false, defaultValue: "free", input: true },
-          image: { type: "string", required: false, input: true },
-          isPremium: { type: "boolean", required: false, defaultValue: false },
-          totalRecipes: { type: "number", required: false, defaultValue: 0 },
-          totalFavorites: { type: "number", required: false, defaultValue: 0 },
-          totalLikesReceived: { type: "number", required: false, defaultValue: 0 },
-        },
-      },
-      session: {
-        cookieCache: {
-          enabled: true,
-          strategy: "jwt",
-          maxAge: 60 * 60 * 24 * 7,
-        },
-      },
-      plugins: [jwt()],
-      secret: process.env.BETTER_AUTH_SECRET || "super-secret-key-12345",
-      baseURL: `http://localhost:${port}`,
-      trustedOrigins: ["http://localhost:3000", "http://127.0.0.1:3000"],
+    const session = await stripe.checkout.sessions.retrieve(session_id);
+
+    if (session.payment_status !== "paid") {
+      return res.status(400).json({ success: false, message: "Payment has not been completed." });
+    }
+
+    let userObjectId;
+    try {
+      userObjectId = new ObjectId(user.id);
+    } catch (err) {
+      return res.status(400).json({ success: false, message: "Invalid User ID format." });
+    }
+
+    const sub_result = await subscriptionCollection.insertOne({
+      userId: userObjectId,
+      session_id,
+      amount: session.amount_total / 100,
+      currency: session.currency,
+      createdAt: new Date(),
     });
 
-    // Better Auth Handler
-    app.all("/api/auth/*splat", toNodeHandler(auth));
+    const user_result = await userCollection.updateOne(
+      { _id: userObjectId },
+      { $set: { plan: "pro", isPremium: true, updatedAt: new Date() } }
+    );
 
-    // Subscription Route
-    app.post("/subscription", async (req, res) => {
-      try {
-        const { user, session_id } = req.body;
-
-        if (!user?.id || !session_id) {
-          return res.status(400).json({ success: false, message: "User ID and session_id are required!" });
-        }
-
-        const session = await stripe.checkout.sessions.retrieve(session_id);
-
-        if (session.payment_status !== "paid") {
-          return res.status(400).json({ success: false, message: "Payment has not been completed." });
-        }
-
-        let userObjectId;
-        try {
-          userObjectId = new ObjectId(user.id);
-        } catch (err) {
-          return res.status(400).json({ success: false, message: "Invalid User ID format." });
-        }
-
-        const sub_result = await subscriptionCollection.insertOne({
-          userId: userObjectId,
-          session_id,
-          amount: session.amount_total / 100,
-          currency: session.currency,
-          createdAt: new Date(),
-        });
-
-        const user_result = await userCollection.updateOne(
-          { _id: userObjectId },
-          { $set: { plan: "pro", isPremium: true, updatedAt: new Date() } }
-        );
-
-        return res.status(200).json({
-          success: true,
-          message: "Subscription verified and plan upgraded successfully!",
-          sub_result,
-          user_result,
-        });
-
-      } catch (error) {
-        console.error("❌ Error in /subscription route:", error);
-        return res.status(500).json({ success: false, message: "Internal Server Error", error: error.message });
-      }
-    });
-
-    // Payment Route
-    app.post("/payment", async (req, res) => {
-      try {
-        const { user, session_id } = req.body;
-
-        if (!session_id) {
-          return res.status(400).json({ success: false, message: "Session ID is required!" });
-        }
-
-        const session = await stripe.checkout.sessions.retrieve(session_id);
-
-        if (session.payment_status !== "paid") {
-          return res.status(400).json({ success: false, message: "Payment has not been completed." });
-        }
-
-        const existingPayment = await paymentCollection.findOne({ session_id });
-        if (existingPayment) {
-          return res.status(200).json({
-            success: true,
-            message: "Payment has already been processed and recorded.",
-            alreadyProcessed: true,
-            data: existingPayment,
-          });
-        }
-
-        const rawUserId = session.metadata?.userId || user?.id || req.body.userId;
-        const rawRecipeId = session.metadata?.recipeId || req.body.recipeId;
-        const recipeName = session.metadata?.name || req.body.name || "Recipe Purchase";
-        const amountPaid = session.amount_total ? session.amount_total / 100 : Number(session.metadata?.price || req.body.price);
-
-        let userObjectId = null;
-        let recipeObjectId = null;
-
-        if (rawUserId) {
-          try { userObjectId = new ObjectId(rawUserId); } catch (err) { userObjectId = rawUserId; }
-        }
-
-        if (rawRecipeId) {
-          try { recipeObjectId = new ObjectId(rawRecipeId); } catch (err) { recipeObjectId = rawRecipeId; }
-        }
-
-        const paymentData = {
-          userId: userObjectId,
-          recipeId: recipeObjectId,
-          recipeName,
-          price: amountPaid,
-          currency: session.currency || "usd",
-          session_id,
-          paymentIntentId: session.payment_intent,
-          customerEmail: session.customer_details?.email || user?.email,
-          metadata: session.metadata || {},
-          status: "completed",
-          createdAt: new Date(),
-        };
-
-        const paymentResult = await paymentCollection.insertOne(paymentData);
-
-        let userUpdateResult = null;
-        if (userObjectId && recipeObjectId) {
-          userUpdateResult = await userCollection.updateOne(
-            { _id: userObjectId },
-            {
-              $addToSet: { purchasedRecipes: recipeObjectId },
-              $set: { updatedAt: new Date() },
-            }
-          );
-        }
-
-        return res.status(200).json({
-          success: true,
-          message: "Payment verified and recorded successfully!",
-          paymentId: paymentResult.insertedId,
-          paymentResult,
-          userUpdateResult,
-        });
-
-      } catch (error) {
-        console.error("❌ Error in /payment route:", error);
-        return res.status(500).json({ success: false, message: "Internal Server Error", error: error.message });
-      }
-    });
-
-    // Post Recipe API
-    app.post("/recipes", verifyToken, async (req, res) => {
-      try {
-        const recipeData = req.body;
-
-        if (!recipeData.name || !recipeData.ingredients) {
-          return res.status(400).json({ success: false, message: "Recipe name and ingredients are required!" });
-        }
-
-        const newRecipe = {
-          ...recipeData,
-          price: Number(recipeData.price) || 0,
-          createdAt: new Date(),
-          status: "approved"
-        };
-
-        const result = await recipeCollection.insertOne(newRecipe);
-
-        res.status(201).json({
-          success: true,
-          message: "Recipe created successfully!",
-          insertedId: result.insertedId
-        });
-
-      } catch (error) {
-        console.error("Error creating recipe:", error);
-        res.status(500).json({ success: false, message: "Failed to create recipe", error: error.message });
-      }
-    });
-
-    // Recipe Like Update API
-    app.patch('/recipes/:id/like', async (req, res) => {
-      const { id } = req.params;
-      const { userId, isLiked } = req.body;
-
-      try {
-        const query = { _id: new ObjectId(id) };
-        const update = isLiked
-          ? { $addToSet: { likedBy: userId }, $inc: { likesCount: 1 } }
-          : { $pull: { likedBy: userId }, $inc: { likesCount: -1 } };
-
-        const result = await db.collection('recipes').updateOne(query, update);
-        res.send({ success: true, result });
-      } catch (error) {
-        res.status(500).send({ success: false, message: error.message });
-      }
-    });
-
-    // Add/Remove Favorite API
-    app.post('/users/favorites', async (req, res) => {
-      const { userId, recipeId, isFavorite } = req.body;
-
-      try {
-        if (isFavorite) {
-          await db.collection('favorites').updateOne(
-            { userId, recipeId },
-            { $set: { userId, recipeId, createdAt: new Date() } },
-            { upsert: true }
-          );
-          await db.collection('recipes').updateOne(
-            { _id: new ObjectId(recipeId) },
-            { $addToSet: { favoritedBy: userId } }
-          );
-        } else {
-          await db.collection('favorites').deleteOne({ userId, recipeId });
-          await db.collection('recipes').updateOne(
-            { _id: new ObjectId(recipeId) },
-            { $pull: { favoritedBy: userId } }
-          );
-        }
-        res.send({ success: true });
-      } catch (error) {
-        res.status(500).send({ success: false, message: error.message });
-      }
-    });
-
-    // GET Favorites list
-    app.get('/api/recipes/favorites', async (req, res) => {
-      try {
-        const { userId, userEmail } = req.query;
-
-        if (!userId && !userEmail) {
-          return res.status(400).json({ success: false, message: "User identity required" });
-        }
-
-        const filterConditions = [];
-        if (userId) filterConditions.push({ userId: userId });
-        if (userEmail) filterConditions.push({ userEmail: userEmail });
-
-        const userFavorites = await db.collection('favorites').find({ $or: filterConditions }).toArray();
-
-        const populatedFavorites = await Promise.all(
-          userFavorites.map(async (fav) => {
-            let recipe = null;
-            if (fav.recipeId) {
-              try {
-                recipe = await db.collection('recipes').findOne({ _id: new ObjectId(fav.recipeId) });
-              } catch (e) {
-                recipe = await db.collection('recipes').findOne({ _id: fav.recipeId });
-              }
-            }
-            return {
-              _id: fav._id,
-              userId: fav.userId,
-              recipe: recipe || fav.recipe || null
-            };
-          })
-        );
-
-        const validFavorites = populatedFavorites.filter(item => item.recipe !== null);
-
-        res.status(200).json({ success: true, favorites: validFavorites });
-      } catch (error) {
-        console.error("Fetch favorites error:", error);
-        res.status(500).json({ success: false, message: error.message });
-      }
-    });
-
-    // DELETE Favorite recipe
-    app.delete('/api/recipes/favorites', async (req, res) => {
-      try {
-        const { favoriteId } = req.body;
-        let query = ObjectId.isValid(favoriteId) ? { _id: new ObjectId(favoriteId) } : { _id: favoriteId };
-
-        const result = await db.collection('favorites').deleteOne(query);
-
-        if (result.deletedCount > 0) {
-          return res.status(200).json({ success: true, message: "Removed successfully" });
-        } else {
-          return res.status(404).json({ success: false, message: "Item not found" });
-        }
-      } catch (error) {
-        res.status(500).json({ success: false, message: error.message });
-      }
-    });
-
-    // Popular Recipes API
-    app.get('/api/popular-recipes', async (req, res) => {
-      try {
-        const popularRecipes = await db.collection('recipes')
-          .find({})
-          .sort({ likesCount: -1 })
-          .limit(3)
-          .toArray();
-
-        res.status(200).json({ success: true, recipes: popularRecipes });
-      } catch (error) {
-        console.error('Error fetching popular recipes:', error);
-        res.status(500).json({ success: false, message: 'Failed to fetch popular recipes' });
-      }
-    });
-
-    // GET Recipes API
-    app.get('/recipes', async (req, res) => {
-      try {
-        const page = parseInt(req.query.page) || 1;
-        const limit = parseInt(req.query.limit) || 10;
-        const skip = (page - 1) * limit;
-
-        const recipes = await recipeCollection.find().skip(skip).limit(limit).toArray();
-        const totalCount = await recipeCollection.countDocuments();
-        const totalPages = Math.ceil(totalCount / limit);
-
-        res.status(200).json({
-          success: true,
-          recipes,
-          totalPages,
-          totalCount,
-          currentPage: page,
-        });
-      } catch (error) {
-        console.error('Error fetching recipes:', error);
-        res.status(500).json({ success: false, message: 'Server error' });
-      }
-    });
-
-    // My Recipes
-    app.get('/myrecipes', async (req, res) => {
-      const result = await recipeCollection.find().toArray();
-      res.send(result);
-    });
-
-    // Submit Report
-    app.post('/api/reports', async (req, res) => {
-      try {
-        const { recipeId, recipeTitle, reportedByEmail, userId, reason } = req.body;
-
-        if (!recipeId || !reason) {
-          return res.status(400).json({ success: false, message: 'Missing required fields' });
-        }
-
-        const newReport = {
-          recipeId: String(recipeId),
-          recipeTitle: recipeTitle || 'Untitled Recipe',
-          reportedByEmail: reportedByEmail || 'Anonymous',
-          userId: userId || null,
-          reason,
-          createdAt: new Date(),
-        };
-
-        const result = await db.collection('reports').insertOne(newReport);
-        res.status(201).json({ success: true, message: 'Report submitted successfully', insertedId: result.insertedId });
-      } catch (error) {
-        console.error('Report submission error:', error);
-        res.status(500).json({ success: false, message: 'Internal server error' });
-      }
-    });
-
-    // Get Admin Reports
-    app.get('/api/admin/reports', async (req, res) => {
-      try {
-        const reports = await db.collection('reports').find({}).sort({ createdAt: -1 }).toArray();
-        res.status(200).json({ success: true, reports });
-      } catch (error) {
-        console.error('Error fetching reports:', error);
-        res.status(500).json({ success: false, message: 'Failed to fetch reports' });
-      }
-    });
-
-    // Delete Admin Reports / Remove Recipe
-    app.delete('/api/admin/reports', async (req, res) => {
-      try {
-        const { reportId, recipeId, action } = req.body;
-
-        if (action === 'remove_recipe') {
-          if (recipeId && ObjectId.isValid(recipeId)) {
-            await db.collection('recipes').deleteOne({ _id: new ObjectId(recipeId) });
-          }
-          if (recipeId) {
-            await db.collection('reports').deleteMany({ recipeId: String(recipeId) });
-          }
-        } else {
-          if (reportId && ObjectId.isValid(reportId)) {
-            await db.collection('reports').deleteOne({ _id: new ObjectId(reportId) });
-          } else {
-            return res.status(400).json({ success: false, message: 'Invalid reportId format' });
-          }
-        }
-
-        res.status(200).json({ success: true, message: 'Action completed successfully' });
-      } catch (error) {
-        console.error('Report action error:', error);
-        res.status(500).json({ success: false, message: 'Action failed' });
-      }
-    });
-
-    // Get Single Recipe by ID
-    app.get("/recipes/:id", async (req, res) => {
-      const { id } = req.params;
-      const result = await recipeCollection.findOne({ _id: new ObjectId(id) });
-      res.send(result);
+    return res.status(200).json({
+      success: true,
+      message: "Subscription verified and plan upgraded successfully!",
+      sub_result,
+      user_result,
     });
 
   } catch (error) {
-    console.error("MongoDB Connection Error:", error);
+    console.error("❌ Error in /subscription route:", error);
+    return res.status(500).json({ success: false, message: "Internal Server Error", error: error.message });
   }
-}
+});
 
-// Start database logic
-run().catch(console.dir);
+// Payment Route
+app.post("/payment", async (req, res) => {
+  try {
+    const { user, session_id } = req.body;
 
-// Export app for Vercel Serverless Function
+    if (!session_id) {
+      return res.status(400).json({ success: false, message: "Session ID is required!" });
+    }
+
+    const session = await stripe.checkout.sessions.retrieve(session_id);
+
+    if (session.payment_status !== "paid") {
+      return res.status(400).json({ success: false, message: "Payment has not been completed." });
+    }
+
+    const existingPayment = await paymentCollection.findOne({ session_id });
+    if (existingPayment) {
+      return res.status(200).json({
+        success: true,
+        message: "Payment has already been processed and recorded.",
+        alreadyProcessed: true,
+        data: existingPayment,
+      });
+    }
+
+    const rawUserId = session.metadata?.userId || user?.id || req.body.userId;
+    const rawRecipeId = session.metadata?.recipeId || req.body.recipeId;
+    const recipeName = session.metadata?.name || req.body.name || "Recipe Purchase";
+    const amountPaid = session.amount_total ? session.amount_total / 100 : Number(session.metadata?.price || req.body.price);
+
+    let userObjectId = null;
+    let recipeObjectId = null;
+
+    if (rawUserId) {
+      try { userObjectId = new ObjectId(rawUserId); } catch (err) { userObjectId = rawUserId; }
+    }
+
+    if (rawRecipeId) {
+      try { recipeObjectId = new ObjectId(rawRecipeId); } catch (err) { recipeObjectId = rawRecipeId; }
+    }
+
+    const paymentData = {
+      userId: userObjectId,
+      recipeId: recipeObjectId,
+      recipeName,
+      price: amountPaid,
+      currency: session.currency || "usd",
+      session_id,
+      paymentIntentId: session.payment_intent,
+      customerEmail: session.customer_details?.email || user?.email,
+      metadata: session.metadata || {},
+      status: "completed",
+      createdAt: new Date(),
+    };
+
+    const paymentResult = await paymentCollection.insertOne(paymentData);
+
+    let userUpdateResult = null;
+    if (userObjectId && recipeObjectId) {
+      userUpdateResult = await userCollection.updateOne(
+        { _id: userObjectId },
+        {
+          $addToSet: { purchasedRecipes: recipeObjectId },
+          $set: { updatedAt: new Date() },
+        }
+      );
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: "Payment verified and recorded successfully!",
+      paymentId: paymentResult.insertedId,
+      paymentResult,
+      userUpdateResult,
+    });
+
+  } catch (error) {
+    console.error("❌ Error in /payment route:", error);
+    return res.status(500).json({ success: false, message: "Internal Server Error", error: error.message });
+  }
+});
+
+// Post Recipe API
+app.post("/recipes", verifyToken, async (req, res) => {
+  try {
+    const recipeData = req.body;
+
+    if (!recipeData.name || !recipeData.ingredients) {
+      return res.status(400).json({ success: false, message: "Recipe name and ingredients are required!" });
+    }
+
+    const newRecipe = {
+      ...recipeData,
+      price: Number(recipeData.price) || 0,
+      createdAt: new Date(),
+      status: "approved"
+    };
+
+    const result = await recipeCollection.insertOne(newRecipe);
+
+    res.status(201).json({
+      success: true,
+      message: "Recipe created successfully!",
+      insertedId: result.insertedId
+    });
+
+  } catch (error) {
+    console.error("Error creating recipe:", error);
+    res.status(500).json({ success: false, message: "Failed to create recipe", error: error.message });
+  }
+});
+
+// Recipe Like Update API
+app.patch('/recipes/:id/like', async (req, res) => {
+  const { id } = req.params;
+  const { userId, isLiked } = req.body;
+
+  try {
+    const query = { _id: new ObjectId(id) };
+    const update = isLiked
+      ? { $addToSet: { likedBy: userId }, $inc: { likesCount: 1 } }
+      : { $pull: { likedBy: userId }, $inc: { likesCount: -1 } };
+
+    const result = await recipeCollection.updateOne(query, update);
+    res.send({ success: true, result });
+  } catch (error) {
+    res.status(500).send({ success: false, message: error.message });
+  }
+});
+
+// Add/Remove Favorite API
+app.post('/users/favorites', async (req, res) => {
+  const { userId, recipeId, isFavorite } = req.body;
+
+  try {
+    if (isFavorite) {
+      await favoritesCollection.updateOne(
+        { userId, recipeId },
+        { $set: { userId, recipeId, createdAt: new Date() } },
+        { upsert: true }
+      );
+      await recipeCollection.updateOne(
+        { _id: new ObjectId(recipeId) },
+        { $addToSet: { favoritedBy: userId } }
+      );
+    } else {
+      await favoritesCollection.deleteOne({ userId, recipeId });
+      await recipeCollection.updateOne(
+        { _id: new ObjectId(recipeId) },
+        { $pull: { favoritedBy: userId } }
+      );
+    }
+    res.send({ success: true });
+  } catch (error) {
+    res.status(500).send({ success: false, message: error.message });
+  }
+});
+
+// GET Favorites list
+app.get('/api/recipes/favorites', async (req, res) => {
+  try {
+    const { userId, userEmail } = req.query;
+
+    if (!userId && !userEmail) {
+      return res.status(400).json({ success: false, message: "User identity required" });
+    }
+
+    const filterConditions = [];
+    if (userId) filterConditions.push({ userId: userId });
+    if (userEmail) filterConditions.push({ userEmail: userEmail });
+
+    const userFavorites = await favoritesCollection.find({ $or: filterConditions }).toArray();
+
+    const populatedFavorites = await Promise.all(
+      userFavorites.map(async (fav) => {
+        let recipe = null;
+        if (fav.recipeId) {
+          try {
+            recipe = await recipeCollection.findOne({ _id: new ObjectId(fav.recipeId) });
+          } catch (e) {
+            recipe = await recipeCollection.findOne({ _id: fav.recipeId });
+          }
+        }
+        return {
+          _id: fav._id,
+          userId: fav.userId,
+          recipe: recipe || fav.recipe || null
+        };
+      })
+    );
+
+    const validFavorites = populatedFavorites.filter(item => item.recipe !== null);
+
+    res.status(200).json({ success: true, favorites: validFavorites });
+  } catch (error) {
+    console.error("Fetch favorites error:", error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+// DELETE Favorite recipe
+app.delete('/api/recipes/favorites', async (req, res) => {
+  try {
+    const { favoriteId } = req.body;
+    let query = ObjectId.isValid(favoriteId) ? { _id: new ObjectId(favoriteId) } : { _id: favoriteId };
+
+    const result = await favoritesCollection.deleteOne(query);
+
+    if (result.deletedCount > 0) {
+      return res.status(200).json({ success: true, message: "Removed successfully" });
+    } else {
+      return res.status(404).json({ success: false, message: "Item not found" });
+    }
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+// Popular Recipes API
+app.get('/api/popular-recipes', async (req, res) => {
+  try {
+    const popularRecipes = await recipeCollection
+      .find({})
+      .sort({ likesCount: -1 })
+      .limit(3)
+      .toArray();
+
+    res.status(200).json({ success: true, recipes: popularRecipes });
+  } catch (error) {
+    console.error('Error fetching popular recipes:', error);
+    res.status(500).json({ success: false, message: 'Failed to fetch popular recipes' });
+  }
+});
+
+// GET Recipes API
+app.get('/recipes', async (req, res) => {
+  try {
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 10;
+    const skip = (page - 1) * limit;
+
+    const recipes = await recipeCollection.find().skip(skip).limit(limit).toArray();
+    const totalCount = await recipeCollection.countDocuments();
+    const totalPages = Math.ceil(totalCount / limit);
+
+    res.status(200).json({
+      success: true,
+      recipes,
+      totalPages,
+      totalCount,
+      currentPage: page,
+    });
+  } catch (error) {
+    console.error('Error fetching recipes:', error);
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
+// My Recipes
+app.get('/myrecipes', async (req, res) => {
+  const result = await recipeCollection.find().toArray();
+  res.send(result);
+});
+
+// Submit Report
+app.post('/api/reports', async (req, res) => {
+  try {
+    const { recipeId, recipeTitle, reportedByEmail, userId, reason } = req.body;
+
+    if (!recipeId || !reason) {
+      return res.status(400).json({ success: false, message: 'Missing required fields' });
+    }
+
+    const newReport = {
+      recipeId: String(recipeId),
+      recipeTitle: recipeTitle || 'Untitled Recipe',
+      reportedByEmail: reportedByEmail || 'Anonymous',
+      userId: userId || null,
+      reason,
+      createdAt: new Date(),
+    };
+
+    const result = await reportsCollection.insertOne(newReport);
+    res.status(201).json({ success: true, message: 'Report submitted successfully', insertedId: result.insertedId });
+  } catch (error) {
+    console.error('Report submission error:', error);
+    res.status(500).json({ success: false, message: 'Internal server error' });
+  }
+});
+
+// Get Admin Reports
+app.get('/api/admin/reports', async (req, res) => {
+  try {
+    const reports = await reportsCollection.find({}).sort({ createdAt: -1 }).toArray();
+    res.status(200).json({ success: true, reports });
+  } catch (error) {
+    console.error('Error fetching reports:', error);
+    res.status(500).json({ success: false, message: 'Failed to fetch reports' });
+  }
+});
+
+// Delete Admin Reports / Remove Recipe
+app.delete('/api/admin/reports', async (req, res) => {
+  try {
+    const { reportId, recipeId, action } = req.body;
+
+    if (action === 'remove_recipe') {
+      if (recipeId && ObjectId.isValid(recipeId)) {
+        await recipeCollection.deleteOne({ _id: new ObjectId(recipeId) });
+      }
+      if (recipeId) {
+        await reportsCollection.deleteMany({ recipeId: String(recipeId) });
+      }
+    } else {
+      if (reportId && ObjectId.isValid(reportId)) {
+        await reportsCollection.deleteOne({ _id: new ObjectId(reportId) });
+      } else {
+        return res.status(400).json({ success: false, message: 'Invalid reportId format' });
+      }
+    }
+
+    res.status(200).json({ success: true, message: 'Action completed successfully' });
+  } catch (error) {
+    console.error('Report action error:', error);
+    res.status(500).json({ success: false, message: 'Action failed' });
+  }
+});
+
+// Get Single Recipe by ID
+app.get("/recipes/:id", async (req, res) => {
+  const { id } = req.params;
+  const result = await recipeCollection.findOne({ _id: new ObjectId(id) });
+  res.send(result);
+});
+
+// Export app for Vercel Serverless
 export default app;
 
-// Local testing execution
 if (process.env.NODE_ENV !== "production") {
   app.listen(port, () => {
     console.log(`🚀 Local Server running on port ${port}`);
   });
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+// import dotenv from 'dotenv';
+// dotenv.config();
+
+// import express from 'express';
+// import cors from 'cors';
+// import { MongoClient, ServerApiVersion, ObjectId } from 'mongodb';
+// import { betterAuth } from 'better-auth';
+// import { mongodbAdapter } from 'better-auth/adapters/mongodb';
+// import { toNodeHandler } from 'better-auth/node';
+// import { jwt } from 'better-auth/plugins';
+// import Stripe from 'stripe';
+// // import { createRemoteJWKSet, jwtVerify } from 'jose';
+// import { createRemoteJWKSet, jwtVerify } from 'jose-cjs';
+
+
+// // Stripe Initialize
+// const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
+
+// const app = express();
+// const port = process.env.PORT || 5000;
+
+// // 1. CORS Middleware
+// app.use(
+//   cors({
+//     origin: [process.env.CLIENT_URL, "http://localhost:3000"],
+//     credentials: true,
+//   })
+// );
+
+// // 2. Body Parser Middleware
+// app.use(express.json());
+
+// // 🎯 Root Route (Global Scope-এ রাখা হয়েছে যাতে Vercel সহজে খুঁজে পায়)
+// app.get('/', (req, res) => {
+//   res.status(200).send('RecipeHouse Server is Running Successfully!');
+// });
+
+// const uri = process.env.MONGODB_URI;
+
+// if (!uri) {
+//   console.error("❌ MONGODB_URI is not defined in .env file!");
+// }
+
+// const client = new MongoClient(uri, {
+//   serverApi: {
+//     version: ServerApiVersion.v1,
+//     strict: true,
+//     deprecationErrors: true,
+//   }
+// });
+
+// // JWKS Cache setup
+// const JWKS = createRemoteJWKSet(new URL(`${process.env.CLIENT_URL || 'http://localhost:3000'}/api/auth/jwks`));
+
+// // Verify Token Middleware
+// const verifyToken = async (req, res, next) => {
+//   const authheader = req.headers.authorization;
+
+//   if (!authheader || !authheader.startsWith("Bearer ")) {
+//     return res.status(401).send({ msg: "Unauthorized" });
+//   }
+
+//   const token = authheader.split(" ")[1];
+
+//   if (!token) {
+//     return res.status(401).send({ msg: "Unauthorized" });
+//   }
+
+//   try {
+//     const { payload } = await jwtVerify(token, JWKS);
+//     req.user = payload;
+//     next();
+//   } catch (error) {
+//     console.error("JWT Error:", error.message);
+//     return res.status(401).send({ msg: "Unauthorized" });
+//   }
+// };
+
+// async function run() {
+//   try {
+//     await client.connect();
+//     const db = client.db("recipehouse");
+//     const subscriptionCollection = db.collection("subscriptions");
+//     const userCollection = db.collection("user");
+//     const recipeCollection = db.collection("recipes");
+//     const paymentCollection = db.collection("payment");
+
+//     console.log("✅ MongoDB Connected Successfully!");
+
+//     // Better Auth Setup
+//     const auth = betterAuth({
+//       database: mongodbAdapter(db, { client: client }),
+//       emailAndPassword: { enabled: true },
+//       socialProviders: {
+//         google: { 
+//           clientId: process.env.GOOGLE_CLIENT_ID,
+//           clientSecret: process.env.GOOGLE_CLIENT_SECRET,
+//         },
+//       },
+//       user: {
+//         additionalFields: {
+//           role: { type: "string", required: false, defaultValue: "user", input: true },
+//           plan: { type: "string", required: false, defaultValue: "free", input: true },
+//           image: { type: "string", required: false, input: true },
+//           isPremium: { type: "boolean", required: false, defaultValue: false },
+//           totalRecipes: { type: "number", required: false, defaultValue: 0 },
+//           totalFavorites: { type: "number", required: false, defaultValue: 0 },
+//           totalLikesReceived: { type: "number", required: false, defaultValue: 0 },
+//         },
+//       },
+//       session: {
+//         cookieCache: {
+//           enabled: true,
+//           strategy: "jwt",
+//           maxAge: 60 * 60 * 24 * 7,
+//         },
+//       },
+//       plugins: [jwt()],
+//       secret: process.env.BETTER_AUTH_SECRET || "super-secret-key-12345",
+//       baseURL: `http://localhost:${port}`,
+//       trustedOrigins: ["http://localhost:3000", "http://127.0.0.1:3000"],
+//     });
+
+//     // Better Auth Handler
+//     app.all("/api/auth/*splat", toNodeHandler(auth));
+
+//     // Subscription Route
+//     app.post("/subscription", async (req, res) => {
+//       try {
+//         const { user, session_id } = req.body;
+
+//         if (!user?.id || !session_id) {
+//           return res.status(400).json({ success: false, message: "User ID and session_id are required!" });
+//         }
+
+//         const session = await stripe.checkout.sessions.retrieve(session_id);
+
+//         if (session.payment_status !== "paid") {
+//           return res.status(400).json({ success: false, message: "Payment has not been completed." });
+//         }
+
+//         let userObjectId;
+//         try {
+//           userObjectId = new ObjectId(user.id);
+//         } catch (err) {
+//           return res.status(400).json({ success: false, message: "Invalid User ID format." });
+//         }
+
+//         const sub_result = await subscriptionCollection.insertOne({
+//           userId: userObjectId,
+//           session_id,
+//           amount: session.amount_total / 100,
+//           currency: session.currency,
+//           createdAt: new Date(),
+//         });
+
+//         const user_result = await userCollection.updateOne(
+//           { _id: userObjectId },
+//           { $set: { plan: "pro", isPremium: true, updatedAt: new Date() } }
+//         );
+
+//         return res.status(200).json({
+//           success: true,
+//           message: "Subscription verified and plan upgraded successfully!",
+//           sub_result,
+//           user_result,
+//         });
+
+//       } catch (error) {
+//         console.error("❌ Error in /subscription route:", error);
+//         return res.status(500).json({ success: false, message: "Internal Server Error", error: error.message });
+//       }
+//     });
+
+//     // Payment Route
+//     app.post("/payment", async (req, res) => {
+//       try {
+//         const { user, session_id } = req.body;
+
+//         if (!session_id) {
+//           return res.status(400).json({ success: false, message: "Session ID is required!" });
+//         }
+
+//         const session = await stripe.checkout.sessions.retrieve(session_id);
+
+//         if (session.payment_status !== "paid") {
+//           return res.status(400).json({ success: false, message: "Payment has not been completed." });
+//         }
+
+//         const existingPayment = await paymentCollection.findOne({ session_id });
+//         if (existingPayment) {
+//           return res.status(200).json({
+//             success: true,
+//             message: "Payment has already been processed and recorded.",
+//             alreadyProcessed: true,
+//             data: existingPayment,
+//           });
+//         }
+
+//         const rawUserId = session.metadata?.userId || user?.id || req.body.userId;
+//         const rawRecipeId = session.metadata?.recipeId || req.body.recipeId;
+//         const recipeName = session.metadata?.name || req.body.name || "Recipe Purchase";
+//         const amountPaid = session.amount_total ? session.amount_total / 100 : Number(session.metadata?.price || req.body.price);
+
+//         let userObjectId = null;
+//         let recipeObjectId = null;
+
+//         if (rawUserId) {
+//           try { userObjectId = new ObjectId(rawUserId); } catch (err) { userObjectId = rawUserId; }
+//         }
+
+//         if (rawRecipeId) {
+//           try { recipeObjectId = new ObjectId(rawRecipeId); } catch (err) { recipeObjectId = rawRecipeId; }
+//         }
+
+//         const paymentData = {
+//           userId: userObjectId,
+//           recipeId: recipeObjectId,
+//           recipeName,
+//           price: amountPaid,
+//           currency: session.currency || "usd",
+//           session_id,
+//           paymentIntentId: session.payment_intent,
+//           customerEmail: session.customer_details?.email || user?.email,
+//           metadata: session.metadata || {},
+//           status: "completed",
+//           createdAt: new Date(),
+//         };
+
+//         const paymentResult = await paymentCollection.insertOne(paymentData);
+
+//         let userUpdateResult = null;
+//         if (userObjectId && recipeObjectId) {
+//           userUpdateResult = await userCollection.updateOne(
+//             { _id: userObjectId },
+//             {
+//               $addToSet: { purchasedRecipes: recipeObjectId },
+//               $set: { updatedAt: new Date() },
+//             }
+//           );
+//         }
+
+//         return res.status(200).json({
+//           success: true,
+//           message: "Payment verified and recorded successfully!",
+//           paymentId: paymentResult.insertedId,
+//           paymentResult,
+//           userUpdateResult,
+//         });
+
+//       } catch (error) {
+//         console.error("❌ Error in /payment route:", error);
+//         return res.status(500).json({ success: false, message: "Internal Server Error", error: error.message });
+//       }
+//     });
+
+//     // Post Recipe API
+//     app.post("/recipes", verifyToken, async (req, res) => {
+//       try {
+//         const recipeData = req.body;
+
+//         if (!recipeData.name || !recipeData.ingredients) {
+//           return res.status(400).json({ success: false, message: "Recipe name and ingredients are required!" });
+//         }
+
+//         const newRecipe = {
+//           ...recipeData,
+//           price: Number(recipeData.price) || 0,
+//           createdAt: new Date(),
+//           status: "approved"
+//         };
+
+//         const result = await recipeCollection.insertOne(newRecipe);
+
+//         res.status(201).json({
+//           success: true,
+//           message: "Recipe created successfully!",
+//           insertedId: result.insertedId
+//         });
+
+//       } catch (error) {
+//         console.error("Error creating recipe:", error);
+//         res.status(500).json({ success: false, message: "Failed to create recipe", error: error.message });
+//       }
+//     });
+
+//     // Recipe Like Update API
+//     app.patch('/recipes/:id/like', async (req, res) => {
+//       const { id } = req.params;
+//       const { userId, isLiked } = req.body;
+
+//       try {
+//         const query = { _id: new ObjectId(id) };
+//         const update = isLiked
+//           ? { $addToSet: { likedBy: userId }, $inc: { likesCount: 1 } }
+//           : { $pull: { likedBy: userId }, $inc: { likesCount: -1 } };
+
+//         const result = await db.collection('recipes').updateOne(query, update);
+//         res.send({ success: true, result });
+//       } catch (error) {
+//         res.status(500).send({ success: false, message: error.message });
+//       }
+//     });
+
+//     // Add/Remove Favorite API
+//     app.post('/users/favorites', async (req, res) => {
+//       const { userId, recipeId, isFavorite } = req.body;
+
+//       try {
+//         if (isFavorite) {
+//           await db.collection('favorites').updateOne(
+//             { userId, recipeId },
+//             { $set: { userId, recipeId, createdAt: new Date() } },
+//             { upsert: true }
+//           );
+//           await db.collection('recipes').updateOne(
+//             { _id: new ObjectId(recipeId) },
+//             { $addToSet: { favoritedBy: userId } }
+//           );
+//         } else {
+//           await db.collection('favorites').deleteOne({ userId, recipeId });
+//           await db.collection('recipes').updateOne(
+//             { _id: new ObjectId(recipeId) },
+//             { $pull: { favoritedBy: userId } }
+//           );
+//         }
+//         res.send({ success: true });
+//       } catch (error) {
+//         res.status(500).send({ success: false, message: error.message });
+//       }
+//     });
+
+//     // GET Favorites list
+//     app.get('/api/recipes/favorites', async (req, res) => {
+//       try {
+//         const { userId, userEmail } = req.query;
+
+//         if (!userId && !userEmail) {
+//           return res.status(400).json({ success: false, message: "User identity required" });
+//         }
+
+//         const filterConditions = [];
+//         if (userId) filterConditions.push({ userId: userId });
+//         if (userEmail) filterConditions.push({ userEmail: userEmail });
+
+//         const userFavorites = await db.collection('favorites').find({ $or: filterConditions }).toArray();
+
+//         const populatedFavorites = await Promise.all(
+//           userFavorites.map(async (fav) => {
+//             let recipe = null;
+//             if (fav.recipeId) {
+//               try {
+//                 recipe = await db.collection('recipes').findOne({ _id: new ObjectId(fav.recipeId) });
+//               } catch (e) {
+//                 recipe = await db.collection('recipes').findOne({ _id: fav.recipeId });
+//               }
+//             }
+//             return {
+//               _id: fav._id,
+//               userId: fav.userId,
+//               recipe: recipe || fav.recipe || null
+//             };
+//           })
+//         );
+
+//         const validFavorites = populatedFavorites.filter(item => item.recipe !== null);
+
+//         res.status(200).json({ success: true, favorites: validFavorites });
+//       } catch (error) {
+//         console.error("Fetch favorites error:", error);
+//         res.status(500).json({ success: false, message: error.message });
+//       }
+//     });
+
+//     // DELETE Favorite recipe
+//     app.delete('/api/recipes/favorites', async (req, res) => {
+//       try {
+//         const { favoriteId } = req.body;
+//         let query = ObjectId.isValid(favoriteId) ? { _id: new ObjectId(favoriteId) } : { _id: favoriteId };
+
+//         const result = await db.collection('favorites').deleteOne(query);
+
+//         if (result.deletedCount > 0) {
+//           return res.status(200).json({ success: true, message: "Removed successfully" });
+//         } else {
+//           return res.status(404).json({ success: false, message: "Item not found" });
+//         }
+//       } catch (error) {
+//         res.status(500).json({ success: false, message: error.message });
+//       }
+//     });
+
+//     // Popular Recipes API
+//     app.get('/api/popular-recipes', async (req, res) => {
+//       try {
+//         const popularRecipes = await db.collection('recipes')
+//           .find({})
+//           .sort({ likesCount: -1 })
+//           .limit(3)
+//           .toArray();
+
+//         res.status(200).json({ success: true, recipes: popularRecipes });
+//       } catch (error) {
+//         console.error('Error fetching popular recipes:', error);
+//         res.status(500).json({ success: false, message: 'Failed to fetch popular recipes' });
+//       }
+//     });
+
+//     // GET Recipes API
+//     app.get('/recipes', async (req, res) => {
+//       try {
+//         const page = parseInt(req.query.page) || 1;
+//         const limit = parseInt(req.query.limit) || 10;
+//         const skip = (page - 1) * limit;
+
+//         const recipes = await recipeCollection.find().skip(skip).limit(limit).toArray();
+//         const totalCount = await recipeCollection.countDocuments();
+//         const totalPages = Math.ceil(totalCount / limit);
+
+//         res.status(200).json({
+//           success: true,
+//           recipes,
+//           totalPages,
+//           totalCount,
+//           currentPage: page,
+//         });
+//       } catch (error) {
+//         console.error('Error fetching recipes:', error);
+//         res.status(500).json({ success: false, message: 'Server error' });
+//       }
+//     });
+
+//     // My Recipes
+//     app.get('/myrecipes', async (req, res) => {
+//       const result = await recipeCollection.find().toArray();
+//       res.send(result);
+//     });
+
+//     // Submit Report
+//     app.post('/api/reports', async (req, res) => {
+//       try {
+//         const { recipeId, recipeTitle, reportedByEmail, userId, reason } = req.body;
+
+//         if (!recipeId || !reason) {
+//           return res.status(400).json({ success: false, message: 'Missing required fields' });
+//         }
+
+//         const newReport = {
+//           recipeId: String(recipeId),
+//           recipeTitle: recipeTitle || 'Untitled Recipe',
+//           reportedByEmail: reportedByEmail || 'Anonymous',
+//           userId: userId || null,
+//           reason,
+//           createdAt: new Date(),
+//         };
+
+//         const result = await db.collection('reports').insertOne(newReport);
+//         res.status(201).json({ success: true, message: 'Report submitted successfully', insertedId: result.insertedId });
+//       } catch (error) {
+//         console.error('Report submission error:', error);
+//         res.status(500).json({ success: false, message: 'Internal server error' });
+//       }
+//     });
+
+//     // Get Admin Reports
+//     app.get('/api/admin/reports', async (req, res) => {
+//       try {
+//         const reports = await db.collection('reports').find({}).sort({ createdAt: -1 }).toArray();
+//         res.status(200).json({ success: true, reports });
+//       } catch (error) {
+//         console.error('Error fetching reports:', error);
+//         res.status(500).json({ success: false, message: 'Failed to fetch reports' });
+//       }
+//     });
+
+//     // Delete Admin Reports / Remove Recipe
+//     app.delete('/api/admin/reports', async (req, res) => {
+//       try {
+//         const { reportId, recipeId, action } = req.body;
+
+//         if (action === 'remove_recipe') {
+//           if (recipeId && ObjectId.isValid(recipeId)) {
+//             await db.collection('recipes').deleteOne({ _id: new ObjectId(recipeId) });
+//           }
+//           if (recipeId) {
+//             await db.collection('reports').deleteMany({ recipeId: String(recipeId) });
+//           }
+//         } else {
+//           if (reportId && ObjectId.isValid(reportId)) {
+//             await db.collection('reports').deleteOne({ _id: new ObjectId(reportId) });
+//           } else {
+//             return res.status(400).json({ success: false, message: 'Invalid reportId format' });
+//           }
+//         }
+
+//         res.status(200).json({ success: true, message: 'Action completed successfully' });
+//       } catch (error) {
+//         console.error('Report action error:', error);
+//         res.status(500).json({ success: false, message: 'Action failed' });
+//       }
+//     });
+
+//     // Get Single Recipe by ID
+//     app.get("/recipes/:id", async (req, res) => {
+//       const { id } = req.params;
+//       const result = await recipeCollection.findOne({ _id: new ObjectId(id) });
+//       res.send(result);
+//     });
+
+//   } catch (error) {
+//     console.error("MongoDB Connection Error:", error);
+//   }
+// }
+
+// // Start database logic
+// run().catch(console.dir);
+
+// // Export app for Vercel Serverless Function
+// export default app;
+
+// // Local testing execution
+// if (process.env.NODE_ENV !== "production") {
+//   app.listen(port, () => {
+//     console.log(`🚀 Local Server running on port ${port}`);
+//   });
+// }
 
 
 
