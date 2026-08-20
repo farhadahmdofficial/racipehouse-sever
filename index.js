@@ -13,7 +13,9 @@ import { mongodbAdapter } from 'better-auth/adapters/mongodb';
 import { toNodeHandler } from 'better-auth/node';
 import { jwt } from 'better-auth/plugins';
 import Stripe from 'stripe';
-import { createRemoteJWKSet, jwtVerify } from 'jose';
+// import { createRemoteJWKSet, jwtVerify } from 'jose';
+const { createRemoteJWKSet, jwtVerify } = require('jose-cjs');
+
 
 // Stripe Initialize
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
