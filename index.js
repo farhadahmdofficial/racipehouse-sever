@@ -8,7 +8,6 @@ import { MongoClient, ServerApiVersion, ObjectId } from 'mongodb';
 import { betterAuth } from 'better-auth';
 import { mongodbAdapter } from 'better-auth/adapters/mongodb';
 import { toNodeHandler } from 'better-auth/node';
-import { jwt } from 'better-auth/plugins';
 import Stripe from 'stripe';
 import { createRemoteJWKSet, jwtVerify } from 'jose-cjs';
 
@@ -16,13 +15,13 @@ const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
 const app = express();
 const port = process.env.PORT || 5000;
 
-// 1. CORS Middleware (Added Live Vercel Client URL)
+// 1. CORS Middleware
 app.use(
   cors({
     origin: [
       process.env.CLIENT_URL,
       "http://localhost:3000",
-      "https://racipehouse-client-theta.vercel.app" // 👈 আপনার লাইভ ফ্রন্টএন্ড URL
+      "https://racipehouse-client-theta.vercel.app"
     ],
     credentials: true,
   })
@@ -52,6 +51,9 @@ const client = new MongoClient(uri, {
 // Cache DB connection for Serverless Architecture
 let db, subscriptionCollection, userCollection, recipeCollection, paymentCollection, favoritesCollection, reportsCollection;
 
+// Better Auth Holder Variable
+let auth;
+
 async function connectDB(req, res, next) {
   try {
     if (!db) {
@@ -63,7 +65,27 @@ async function connectDB(req, res, next) {
       paymentCollection = db.collection("payment");
       favoritesCollection = db.collection("favorites");
       reportsCollection = db.collection("reports");
-      console.log("✅ MongoDB Connected Successfully!");
+
+      // 🔐 Initialize Better Auth with Database instance
+      auth = betterAuth({
+        database: mongodbAdapter(db, { client: client }),
+        emailAndPassword: { enabled: true },
+        socialProviders: {
+          google: {
+            clientId: process.env.GOOGLE_CLIENT_ID,
+            clientSecret: process.env.GOOGLE_CLIENT_SECRET,
+          },
+        },
+        secret: process.env.BETTER_AUTH_SECRET,
+        baseURL: process.env.BETTER_AUTH_URL || "https://recipehouse-sever.vercel.app",
+        trustedOrigins: [
+          "http://localhost:3000",
+          "https://racipehouse-client-theta.vercel.app",
+          process.env.CLIENT_URL
+        ].filter(Boolean),
+      });
+
+      console.log("✅ MongoDB & Better Auth Connected Successfully!");
     }
     req.db = db;
     next();
@@ -75,6 +97,14 @@ async function connectDB(req, res, next) {
 
 // Global DB Middleware
 app.use(connectDB);
+
+// 🔐 Better Auth API Route Handler (Express Wildcard)
+app.all("/api/auth/*", (req, res, next) => {
+  if (!auth) {
+    return res.status(500).json({ message: "Auth initialization pending" });
+  }
+  return toNodeHandler(auth)(req, res, next);
+});
 
 // JWKS Cache setup
 const JWKS = createRemoteJWKSet(new URL(`${process.env.CLIENT_URL || 'https://racipehouse-client-theta.vercel.app'}/api/auth/jwks`));
@@ -496,7 +526,6 @@ if (process.env.NODE_ENV !== "production") {
     console.log(`🚀 Local Server running on port ${port}`);
   });
 }
-
 
 
 
