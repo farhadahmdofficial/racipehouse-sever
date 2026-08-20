@@ -1,4 +1,3 @@
-
 import dotenv from 'dotenv';
 dotenv.config();
 
@@ -15,14 +14,14 @@ const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
 const app = express();
 const port = process.env.PORT || 5000;
 
-// 1. CORS Middleware
+// 1. CORS Middleware Configuration
 app.use(
   cors({
     origin: [
       process.env.CLIENT_URL,
       "http://localhost:3000",
       "https://racipehouse-client-theta.vercel.app"
-    ],
+    ].filter(Boolean),
     credentials: true,
   })
 );
@@ -40,7 +39,7 @@ const client = new MongoClient(uri, {
 
 let db, auth;
 
-// DB & Better Auth DB Init Function
+// DB & Better Auth Init Function
 async function init() {
   if (!db) {
     await client.connect();
@@ -62,6 +61,19 @@ async function init() {
         "https://racipehouse-client-theta.vercel.app",
         process.env.CLIENT_URL
       ].filter(Boolean),
+      
+      // 🔐 Cross-Domain Cookie Configuration Fix
+      advanced: {
+        useSecureCookies: true,
+        cookiePrefix: "recipehouse",
+        crossSubdomainCookies: {
+          enabled: true,
+        },
+        defaultCookieAttributes: {
+          sameSite: "none", // Cross-origin-এ cookie পাঠাতে আবশ্যক
+          secure: true,    // HTTPS এনভায়রনমেন্টের জন্য প্রয়োজন
+        }
+      }
     });
 
     console.log("✅ MongoDB & Better Auth Connected Successfully!");
@@ -85,8 +97,8 @@ app.get('/', (req, res) => {
   res.status(200).send('RecipeHouse Server is Running Successfully!');
 });
 
-// 🔐 Better Auth API Route Handler (Fixed Path Parameter)
-app.all("/api/auth/{*path}", (req, res, next) => {
+// 🔐 Better Auth API Route Handler (Vercel Node/Express Catch-all)
+app.all("/api/auth/*path", (req, res, next) => {
   if (!auth) {
     return res.status(500).json({ message: "Auth initialization pending" });
   }
@@ -125,7 +137,6 @@ if (process.env.NODE_ENV !== "production") {
     console.log(`🚀 Local Server running on port ${port}`);
   });
 }
-
 
 
 
