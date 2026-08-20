@@ -285,6 +285,29 @@ app.post("/payment", async (req, res) => {
 });
 
 // 🍲 Recipe Management Routes
+
+app.post("/recipes", verifyToken, async (req, res) => {
+  try {
+    const recipeData = req.body;
+
+    if (!recipeData.name || !recipeData.ingredients) {
+      return res.status(400).json({ success: false, message: "Recipe name and ingredients are required!" });
+    }
+
+    const newRecipe = {
+      ...recipeData,
+      price: Number(recipeData.price) || 0,
+      createdAt: new Date(),
+      status: "approved"
+    };
+
+    const result = await recipeCollection.insertOne(newRecipe);
+    res.status(201).json({ success: true, message: "Recipe created successfully!", insertedId: result.insertedId });
+  } catch (error) {
+    console.error("Error creating recipe:", error);
+    res.status(500).json({ success: false, message: "Failed to create recipe", error: error.message });
+  }
+});
 app.get('/recipes', async (req, res) => {
   try {
     const page = parseInt(req.query.page) || 1;
@@ -314,28 +337,7 @@ app.get("/recipes/:id", async (req, res) => {
     res.send(result);
   });
 
-app.post("/recipes", verifyToken, async (req, res) => {
-  try {
-    const recipeData = req.body;
 
-    if (!recipeData.name || !recipeData.ingredients) {
-      return res.status(400).json({ success: false, message: "Recipe name and ingredients are required!" });
-    }
-
-    const newRecipe = {
-      ...recipeData,
-      price: Number(recipeData.price) || 0,
-      createdAt: new Date(),
-      status: "approved"
-    };
-
-    const result = await recipeCollection.insertOne(newRecipe);
-    res.status(201).json({ success: true, message: "Recipe created successfully!", insertedId: result.insertedId });
-  } catch (error) {
-    console.error("Error creating recipe:", error);
-    res.status(500).json({ success: false, message: "Failed to create recipe", error: error.message });
-  }
-});
 
 app.get('/myrecipes', async (req, res) => {
   try {
