@@ -307,6 +307,12 @@ app.get('/recipes', async (req, res) => {
     res.status(500).json({ success: false, message: 'Server error' });
   }
 });
+app.get("/recipes/:id", async (req, res) => {
+    const {id} = req.params
+    const result = await recipeCollection.findOne({ _id: new ObjectId(id) });
+    
+    res.send(result);
+  });
 
 app.post("/recipes", verifyToken, async (req, res) => {
   try {
@@ -1219,7 +1225,7 @@ if (process.env.NODE_ENV !== "production") {
 
 
 
-// ok code 
+// ok code  alllll
 
 
 
