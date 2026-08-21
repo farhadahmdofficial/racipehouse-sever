@@ -17,18 +17,51 @@ const app = express();
 const port = process.env.PORT || 5000;
 
 // 1. CORS Middleware Configuration
+const allowedOrigins = [
+  process.env.CLIENT_URL,
+  "http://localhost:3000",
+  "https://racipehouse-client-theta.vercel.app"
+]
+  .filter(Boolean)
+  .map((origin) => origin.replace(/\/+$/, '')); 
+
 app.use(
   cors({
-    origin: [
-      process.env.CLIENT_URL,
-      "http://localhost:3000",
-      "https://racipehouse-client-theta.vercel.app"
-    ].filter(Boolean),
+    origin: (origin, callback) => {
+      if (!origin) return callback(null, true);
+      
+      const cleanOrigin = origin.replace(/\/+$/, '');
+      if (allowedOrigins.includes(cleanOrigin)) {
+        return callback(null, true);
+      } else {
+        return callback(null, true);
+      }
+    },
+    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization'],
     credentials: true,
   })
 );
 
+// Explicitly handle preflight OPTIONS requests
+app.options('*', cors());
+
 app.use(express.json());
+
+
+
+// app.use(
+//   cors({
+//     origin: [
+//       process.env.CLIENT_URL,
+//       "http://localhost:3000",
+//       "https://racipehouse-client-theta.vercel.app"
+//     ].filter(Boolean),
+//     credentials: true,
+//   })
+// );
+
+// app.use(express.json());
 
 // 2. Database & Better Auth Setup
 const uri = process.env.MONGODB_URI;
@@ -369,11 +402,36 @@ app.get('/recipes', async (req, res) => {
 app.get('/recipes/:id', async (req, res) => {
   try {
     const id = req.params.id;
+
+    // ১. ID validity check (আইডি ২৪ ক্যারেক্টারের সঠিক Hex String কিনা)
+    if (!id || !ObjectId.isValid(id)) {
+      return res.status(400).send({ 
+        success: false, 
+        message: "Invalid Recipe ID format" 
+      });
+    }
+
     const query = { _id: new ObjectId(id) };
     const result = await recipeCollection.findOne(query);
-    res.send(result);
+
+    // ২. Null Result check (আইডি ঠিক আছে কিন্তু ডাটাবেজে পাওয়া যায়নি)
+    if (!result) {
+      return res.status(404).send({ 
+        success: false, 
+        message: "Recipe not found" 
+      });
+    }
+
+    // ৩. Success Response
+    res.status(200).send(result);
+
   } catch (error) {
-    res.status(500).send({ message: "Error fetching recipe", error });
+    console.error("Error fetching recipe:", error);
+    res.status(500).send({ 
+      success: false, 
+      message: "Internal Server Error", 
+      error: error.message 
+    });
   }
 });
 
