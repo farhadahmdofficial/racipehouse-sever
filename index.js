@@ -319,6 +319,7 @@ app.post("/payment", async (req, res) => {
 
 // 🍲 Recipe Management Routes
 
+
 app.post("/recipes", verifyToken, async (req, res) => {
   try {
     const recipeData = req.body;
@@ -327,8 +328,19 @@ app.post("/recipes", verifyToken, async (req, res) => {
       return res.status(400).json({ success: false, message: "Recipe name and ingredients are required!" });
     }
 
+    // verifyToken মিডলওয়্যার থেকে প্রাপ্ত ইউজার আইডি ও ইমেইল
+    // (আপনার verifyToken এ req.user যেভাবে সেট করা আছে - id, _id বা userId)
+    const tokenUserId = req.user?.id || req.user?._id || req.user?.userId;
+    const tokenUserEmail = req.user?.email;
+
+    if (!tokenUserId) {
+      return res.status(401).json({ success: false, message: "Invalid user token!" });
+    }
+
     const newRecipe = {
       ...recipeData,
+      userId: String(tokenUserId), // ক্লায়েন্টের পাঠানো userId ওভাররাইড করে টোকেনের আসল ID বসানো হলো
+      userEmail: tokenUserEmail || recipeData.userEmail,
       price: Number(recipeData.price) || 0,
       createdAt: new Date(),
       status: "approved"
@@ -341,14 +353,47 @@ app.post("/recipes", verifyToken, async (req, res) => {
     res.status(500).json({ success: false, message: "Failed to create recipe", error: error.message });
   }
 });
+// ok code 
+
+// app.post("/recipes", verifyToken, async (req, res) => {
+//   try {
+//     const recipeData = req.body;
+
+//     if (!recipeData.name || !recipeData.ingredients) {
+//       return res.status(400).json({ success: false, message: "Recipe name and ingredients are required!" });
+//     }
+
+//     const newRecipe = {
+//       ...recipeData,
+//       price: Number(recipeData.price) || 0,
+//       createdAt: new Date(),
+//       status: "approved"
+//     };
+
+//     const result = await recipeCollection.insertOne(newRecipe);
+//     res.status(201).json({ success: true, message: "Recipe created successfully!", insertedId: result.insertedId });
+//   } catch (error) {
+//     console.error("Error creating recipe:", error);
+//     res.status(500).json({ success: false, message: "Failed to create recipe", error: error.message });
+//   }
+// });
+
+
+
 app.get('/recipes', async (req, res) => {
   try {
     const page = parseInt(req.query.page) || 1;
     const limit = parseInt(req.query.limit) || 10;
     const skip = (page - 1) * limit;
 
-    const recipes = await recipeCollection.find().skip(skip).limit(limit).toArray();
-    const totalCount = await recipeCollection.countDocuments();
+    // query parameter থেকে userId থাকলে সেটা দিয়ে ফিল্টার করবে
+    const query = {};
+    if (req.query.userId) {
+      query.userId = req.query.userId;
+    }
+
+    const recipes = await recipeCollection.find(query).skip(skip).limit(limit).toArray();
+    const totalCount = await recipeCollection.countDocuments(query);
     const totalPages = Math.ceil(totalCount / limit);
 
     res.status(200).json({
@@ -363,6 +408,29 @@ app.get('/recipes', async (req, res) => {
     res.status(500).json({ success: false, message: 'Server error' });
   }
 });
+
+// app.get('/recipes', async (req, res) => {
+//   try {
+//     const page = parseInt(req.query.page) || 1;
+//     const limit = parseInt(req.query.limit) || 10;
+//     const skip = (page - 1) * limit;
+
+//     const recipes = await recipeCollection.find().skip(skip).limit(limit).toArray();
+//     const totalCount = await recipeCollection.countDocuments();
+//     const totalPages = Math.ceil(totalCount / limit);
+
+//     res.status(200).json({
+//       success: true,
+//       recipes,
+//       totalPages,
+//       totalCount,
+//       currentPage: page,
+//     });
+//   } catch (error) {
+//     console.error('Error fetching recipes:', error);
+//     res.status(500).json({ success: false, message: 'Server error' });
+//   }
+// });
 
 // app.get("/recipes/:id", async (req, res) => {
 //   try {
@@ -479,6 +547,27 @@ app.patch('/recipes/:id/like', async (req, res) => {
     res.send({ success: true, result });
   } catch (error) {
     res.status(500).send({ success: false, message: error.message });
+  }
+});
+
+
+// Express Backend Endpoint
+app.get('/recipes/count', async (req, res) => {
+  try {
+    const { userId } = req.query;
+    if (!userId) return res.json({ recipeCount: 0 });
+
+    const recipeCount = await recipeCollection.countDocuments({
+      $or: [
+        { userId: userId },
+        { "author.id": userId },
+        { "author.email": req.query.email }
+      ]
+    });
+
+    res.json({ recipeCount });
+  } catch (err) {
+    res.status(500).json({ recipeCount: 0 });
   }
 });
 
