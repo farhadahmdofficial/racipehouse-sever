@@ -383,7 +383,7 @@ app.post("/recipes", verifyToken, async (req, res) => {
 app.get('/recipes', async (req, res) => {
   try {
     const page = parseInt(req.query.page) || 1;
-    const limit = parseInt(req.query.limit) || 10;
+    const limit = parseInt(req.query.limit) || 9;
     const skip = (page - 1) * limit;
 
     // query parameter থেকে userId থাকলে সেটা দিয়ে ফিল্টার করবে
