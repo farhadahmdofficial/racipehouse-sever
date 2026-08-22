@@ -523,15 +523,47 @@ app.get('/myrecipes', async (req, res) => {
   }
 });
 
+
+// ok code  to api  popular
+
+// app.get('/api/popular-recipes', async (req, res) => {
+//   try {
+//     const popularRecipes = await recipeCollection.find({}).sort({ likesCount: -1 }).limit(3).toArray();
+//     res.status(200).json({ success: true, recipes: popularRecipes });
+//   } catch (error) {
+//     console.error('Error fetching popular recipes:', error);
+//     res.status(500).json({ success: false, message: 'Failed to fetch popular recipes' });
+//   }
+// });
+
+
 app.get('/api/popular-recipes', async (req, res) => {
   try {
-    const popularRecipes = await recipeCollection.find({}).sort({ likesCount: -1 }).limit(3).toArray();
+    // likesCount থাকলে সেটা দিয়ে সর্ট করবে, নাহলে createdAt দিয়ে
+    let popularRecipes = await recipeCollection
+      .find({})
+      .sort({ likesCount: -1, _id: -1 })
+      .limit(3)
+      .toArray();
+
+    // যদি কোনো কারণে empty array আসে, তবে নরমালি যেকোনো ৩টি রেসিপি নিয়ে আসবে
+    if (!popularRecipes || popularRecipes.length === 0) {
+      popularRecipes = await recipeCollection
+        .find({})
+        .limit(3)
+        .toArray();
+    }
+
     res.status(200).json({ success: true, recipes: popularRecipes });
   } catch (error) {
     console.error('Error fetching popular recipes:', error);
     res.status(500).json({ success: false, message: 'Failed to fetch popular recipes' });
   }
 });
+
+
+
+
 
 app.patch('/recipes/:id/like', async (req, res) => {
   const { id } = req.params;
