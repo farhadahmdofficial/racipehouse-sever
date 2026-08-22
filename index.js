@@ -572,32 +572,78 @@ app.get('/recipes/count', async (req, res) => {
 });
 
 // ❤️ Favorite Routes
+// ❤️ Favorite Toggle Route
 app.post('/users/favorites', async (req, res) => {
   const { userId, recipeId, isFavorite } = req.body;
 
   try {
+    if (!userId || !recipeId) {
+      return res.status(400).send({ success: false, message: "userId & recipeId required" });
+    }
+
+    const cleanUserId = String(userId).trim();
+    const cleanRecipeId = String(recipeId).trim();
+
     if (isFavorite) {
+      // 1. Add to Favorites Collection
       await favoritesCollection.updateOne(
-        { userId, recipeId },
-        { $set: { userId, recipeId, createdAt: new Date() } },
+        { userId: cleanUserId, recipeId: cleanRecipeId },
+        { $set: { userId: cleanUserId, recipeId: cleanRecipeId, createdAt: new Date() } },
         { upsert: true }
       );
+
+      // 2. Add to Recipe's favoritedBy Array
+      const recipeQuery = ObjectId.isValid(cleanRecipeId) ? { _id: new ObjectId(cleanRecipeId) } : { _id: cleanRecipeId };
       await recipeCollection.updateOne(
-        { _id: new ObjectId(recipeId) },
-        { $addToSet: { favoritedBy: userId } }
+        recipeQuery,
+        { $addToSet: { favoritedBy: cleanUserId } }
       );
     } else {
-      await favoritesCollection.deleteOne({ userId, recipeId });
+      // 1. Remove from Favorites Collection (String matching)
+      await favoritesCollection.deleteMany({ userId: cleanUserId, recipeId: cleanRecipeId });
+
+      // 2. Remove from Recipe's favoritedBy Array
+      const recipeQuery = ObjectId.isValid(cleanRecipeId) ? { _id: new ObjectId(cleanRecipeId) } : { _id: cleanRecipeId };
       await recipeCollection.updateOne(
-        { _id: new ObjectId(recipeId) },
-        { $pull: { favoritedBy: userId } }
+        recipeQuery,
+        { $pull: { favoritedBy: cleanUserId } }
       );
     }
-    res.send({ success: true });
+
+    res.send({ success: true, isFavorite });
   } catch (error) {
+    console.error("Favorite Toggle Error:", error);
     res.status(500).send({ success: false, message: error.message });
   }
 });
+
+// ok code 
+// app.post('/users/favorites', async (req, res) => {
+//   const { userId, recipeId, isFavorite } = req.body;
+
+//   try {
+//     if (isFavorite) {
+//       await favoritesCollection.updateOne(
+//         { userId, recipeId },
+//         { $set: { userId, recipeId, createdAt: new Date() } },
+//         { upsert: true }
+//       );
+//       await recipeCollection.updateOne(
+//         { _id: new ObjectId(recipeId) },
+//         { $addToSet: { favoritedBy: userId } }
+//       );
+//     } else {
+//       await favoritesCollection.deleteOne({ userId, recipeId });
+//       await recipeCollection.updateOne(
+//         { _id: new ObjectId(recipeId) },
+//         { $pull: { favoritedBy: userId } }
+//       );
+//     }
+//     res.send({ success: true });
+//   } catch (error) {
+//     res.status(500).send({ success: false, message: error.message });
+//   }
+// });
 
 app.get('/api/recipes/favorites', async (req, res) => {
   try {
